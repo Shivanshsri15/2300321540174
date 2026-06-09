@@ -21,9 +21,9 @@ export class PriorityInbox {
     }
   }
 
-  getTop10(): Notification[] {
+  getTop(limit: number): Notification[] {
     return [...this.items.values()]
       .sort((a, b) => score(b) - score(a))
-      .slice(0, 10);
+      .slice(0, limit);
   }
 }

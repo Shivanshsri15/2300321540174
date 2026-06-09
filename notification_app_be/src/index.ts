@@ -1,3 +1,4 @@
+import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import {
@@ -20,29 +21,37 @@ if (token) {
 
 const app = express();
 
+app.use(cors({ origin: "http://localhost:3000" }));
 app.use(expressLoggingMiddleware());
 
-app.get("/api/priority-inbox", async (_req, res) => {
+app.get("/api/priority-inbox", async (req, res) => {
   if (!token) {
     Log("backend", "error", "config", "EVALUATION_ACCESS_TOKEN is not set");
     res.status(500).json({ error: "EVALUATION_ACCESS_TOKEN is not set" });
     return;
   }
 
+  const limit = Number(req.query.limit) || 10;
+  const notificationType = req.query.notification_type as string | undefined;
+
   try {
-    const notifications = await fetchNotifications(token);
+    let notifications = await fetchNotifications(token);
+
+    if (notificationType) {
+      notifications = notifications.filter(
+        (n) => n.Type.toLowerCase() === notificationType.toLowerCase()
+      );
+    }
+
     const inbox = new PriorityInbox();
     inbox.addMany(notifications);
-    const top = inbox.getTop10();
-
-    console.log(`Fetched ${notifications.length} notifications`);
-    console.log("Top 10 priority inbox:", JSON.stringify(top, null, 2));
+    const top = inbox.getTop(limit);
 
     Log(
       "backend",
       "info",
       "handler",
-      `Returning ${top.length} priority notifications`
+      `Returning ${top.length} priority notifications limit=${limit} type=${notificationType || "all"}`
     );
     res.json({ notifications: top });
   } catch (err) {
@@ -53,10 +62,9 @@ app.get("/api/priority-inbox", async (_req, res) => {
   }
 });
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3001;
 
 app.listen(port, () => {
   console.log(`Server started on http://localhost:${port}`);
-  console.log(`Hit from Postman: GET http://localhost:${port}/api/priority-inbox`);
   Log("backend", "info", "config", `Server started on port ${port}`);
 });
