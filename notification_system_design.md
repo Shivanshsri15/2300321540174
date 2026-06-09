@@ -16,6 +16,7 @@ Notification:
   "userId": "string",
   "title": "string",
   "body": "string",
+  "read": "boolean",
   "createdAt": "Date"
 }
 
@@ -79,6 +80,8 @@ Authorization: Bearer <token>
 
 Returns notifications for userId from token.
 
+Query params: read (true|false)
+
 Response 200:
 {
   "notifications": [ Notification ]
@@ -123,4 +126,79 @@ Response 201:
 
 Response 400: invalid request body
 Response 401: unauthorized
+
+---
+
+###### Stage 2
+
+DB: MongoDB
+
+Why MongoDB:
+- notification data is document-shaped, matches API JSON
+- flexible schema for future fields
+- scales horizontally with sharding/replica sets
+- good fit for per-userId read queries with indexes
+
+DB schema:
+
+users collection:
+{
+  _id: ObjectId,
+  email: string (unique),
+  password: string (hashed),
+  rollNo: string
+}
+
+notifications collection:
+{
+  _id: ObjectId,
+  userId: ObjectId (ref users._id),
+  title: string,
+  body: string,
+  category: string,
+  read: boolean,
+  createdAt: Date
+}
+
+indexes:
+- users: { email: 1 } unique
+- notifications: { userId: 1, createdAt: -1 }
+- notifications: { userId: 1, read: 1 }
+
+Problems as data grows:
+- slow list queries without index on userId
+- large result sets for active users
+- slow bulk writes when sending to many userIds at once
+- memory/disk pressure if notifications collection grows unbounded
+- ObjectId string conversion overhead at API layer (minor)
+
+Solutions:
+- index on userId + createdAt
+- pagination on GET /api/notifications (limit)
+- insertMany for batch send instead of multiple inserts
+- archive or TTL old notifications if not needed long term
+- shard notifications collection by userId at very large scale
+
+Queries (MongoDB):
+
+register:
+db.users.insertOne({ email, password, rollNo })
+
+login:
+db.users.findOne({ email })
+
+list notifications for logged-in user:
+db.notifications.find({ userId: ObjectId(userId) }).sort({ createdAt: -1 })
+
+list notifications by read status:
+db.notifications.find({ userId: ObjectId(userId), read: true }).sort({ createdAt: -1 })
+db.notifications.find({ userId: ObjectId(userId), read: false }).sort({ createdAt: -1 })
+
+get single notification:
+db.notifications.findOne({ _id: ObjectId(id), userId: ObjectId(userId) })
+
+send notification to userIds from frontend:
+db.notifications.insertMany(
+  userIds.map(uid => ({ userId: ObjectId(uid), title, body, category, read: false, createdAt: new Date() }))
+)
 
