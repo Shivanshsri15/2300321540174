@@ -202,3 +202,59 @@ db.notifications.insertMany(
   userIds.map(uid => ({ userId: ObjectId(uid), title, body, category, read: false, createdAt: new Date() }))
 )
 
+---
+
+###### Stage 3
+
+Scenario: 50k students, 5M notifications. slow query to fetch unread notifications for one student.
+
+Query (MongoDB equivalent):
+db.notifications.find({ userId: ObjectId(userId), read: false }).sort({ createdAt: 1 })
+
+1. Is the query accurate?
+Yes. it filters by userId and read false, sorts oldest first. logic is also correct for unread notifications for one student only.
+
+2. Why is it slow?
+At 5M docs MongoDB likely does a collection scan or uses a weak index. without a compound index on userId + read + createdAt, the engine scans too many documents. returning all fields on a large unread list adds I/O. if a student has thousands of unread items, sorting in memory also hurts. avg 100 notifications per student means hot users block longer.
+
+3. What to change and cost?
+
+- add compound index: { userId: 1, read: 1, createdAt: 1 }
+  cost: one-time index build on 5M docs (CPU + disk, slower writes after). reads become index scans, much faster.
+
+- use projection, only return needed fields (_id, title, body, createdAt)
+  cost: almost free. less data over the wire.
+
+- add pagination with limit 
+  cost: free. avoids loading entire unread list at once.
+
+- run explain("executionStats") to confirm IXSCAN not COLLSCAN
+  cost: negligible. confirms index is actually used.
+
+4. Index every column?
+No. bad advice. each index slows inserts/updates because every write updates all indexes. indexes on low-cardinality fields alone (like read boolean) are weak. index only fields used in filter + sort together. our case: userId, read, createdAt, and maybe category for type queries.
+
+5. Students who got a placement notification in last 7 days:
+
+db.notifications.aggregate([
+  {
+    $match: {
+      category: "placements",
+      createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+    }
+  },
+  { $group: { _id: "$userId" } },
+  {
+    $lookup: {
+      from: "users",
+      localField: "_id",
+      foreignField: "_id",
+      as: "student"
+    }
+  },
+  { $unwind: "$student" },
+  { $project: { _id: 0, email: "$student.email", rollNo: "$student.rollNo" } }
+])
+
+index to support this: { category: 1, createdAt: -1 }
+
