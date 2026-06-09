@@ -258,3 +258,47 @@ db.notifications.aggregate([
 
 index to support this: { category: 1, createdAt: -1 }
 
+---
+
+###### Stage 4
+
+Problem: notifications fetched from MongoDB on every page load for every student. DB gets hit too often, pages feel slow.
+
+1. Stop fetching full list on every page load
+
+Only fetch notifications on the notifications page or when user opens the panel. on other pages just fetch unread count if needed.
+
+tradeoff: less DB load, faster page loads. but badge count needs a separate lightweight call or cache - (we can use REDIS in this case for backend).
+
+2. Cache in Redis per userId
+
+cache unread count and latest N notifications keyed by userId. invalidate cache when new notification is sent or read status changes.
+
+tradeoff: reads drop heavily, response time improves. extra infra to run Redis, cache invalidation can get tricky if not handled cleanly.
+
+3. Pagination + limit on list API
+
+GET /api/notifications?read=false&limit=20 instead of returning all unread docs.
+
+tradeoff: simple to add, works with existing MongoDB indexes. user may need load more for older items.
+
+4. Separate unread count endpoint
+
+GET /api/notifications/unread-count returns just { count }. much cheaper than full find on every page load.
+
+tradeoff: two endpoints instead of one, but count query with index { userId: 1, read: 1 } is fast and small.
+
+5. Push updates with SSE instead of polling
+
+client opens SSE once after login. server pushes new notifications. page loads skip DB fetch unless cache is stale.
+
+tradeoff: real-time feel, fewer repeated reads. long-lived connections on server, reconnect logic needed on client.
+
+6. Client-side cache
+
+store last fetched notifications in memory/localStorage with short TTL. refetch only when TTL expires or user refreshes.
+
+tradeoff: free to implement, cuts repeat requests. data can be slightly stale for a few seconds.
+
+this keeps MongoDB from getting hammered on every navigation while still showing correct unread state.
+
