@@ -384,3 +384,29 @@ function email_worker(userId, notification):
 
 batch DB write + parallel workers + separate email queue = fast and recoverable.
 
+---
+
+###### Stage 6
+
+Priority Inbox: top 10 most important notifications by weight + recency.
+
+Priority order: Placement > Result > Event. within same type, newer Timestamp wins.
+
+Data source: GET http://4.224.186.213/evaluation-service/notifications (Bearer token). no database used.
+
+API response fields used: ID, Type, Message, Timestamp.
+
+Implementation (notification_app_be):
+
+- fetchNotifications.ts — calls evaluation-service notifications API
+- priorityInbox.ts — keeps top 10 in memory, dedupes by ID, sorts by weight then timestamp
+- index.ts — Express server, polls API every 5s, GET /api/priority-inbox returns top 10
+
+weight values: Placement=3, Result=2, Event=1.
+priority score = weight * 1e15 + timestamp ms.
+
+on each poll new notifications are added. inbox only keeps 10 highest priority items.
+
+
+GET http://localhost:3000/api/priority-inbox
+
